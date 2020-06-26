@@ -29,6 +29,9 @@
 
 #ifdef SYSLOG
 # include <syslog.h>
+#else
+# include <pwd.h>
+# include <string.h>
 #endif
 
 #include "ngircd.h"
@@ -40,18 +43,57 @@
 #include "log.h"
 
 static bool Is_Daemon;
+#ifndef SYSLOG
+# define LOG_PATH_LEN 512
+static const char *log_file_name = "ngircd.log";
+static char log_file_path[LOG_PATH_LEN] = {0};
+#endif
 
 
 static void
 Log_Message(int Level, const char *msg)
 {
-	if (!Is_Daemon) {
-		/* log to console */
-		fprintf(stdout, "[%ld:%d %4ld] %s\n", (long)getpid(), Level,
-				(long)(time(NULL) - NGIRCd_Start), msg);
-		fflush(stdout);
-	}
 #ifdef SYSLOG
+	if (!Is_Daemon) {
+		FILE *fd = stdout;
+#else
+    FILE *fd;
+	if (!Is_Daemon) {
+		fd = stdout;
+	}
+	else {
+		if (!strlen(log_file_path)) {
+			struct passwd *pw = getpwuid(getuid());
+			if (pw) {
+				strcat(log_file_path, pw->pw_dir);
+				strcat(log_file_path, "/");
+				strncat(log_file_path,
+						log_file_name,
+						sizeof(char) * LOG_PATH_LEN - strlen(log_file_name) - 2);
+			}
+			else strcat(log_file_path, log_file_name);
+		}
+		fd = fopen(log_file_path, "a");
+	}
+#endif
+		if (fd) {
+			fprintf(fd,
+				 	"[%ld:%d %4ld] %s\n",
+				 	(long) getpid(), Level,
+				 	(long) (time(NULL) - NGIRCd_Start),
+				 	msg);
+			fflush(fd);
+			fflush(stdout);
+		}
+		else {
+			fprintf(stdout, "%s\n", "Can`t write log");
+			fflush(stdout);
+		}
+#ifndef SYSLOG
+	if (Is_Daemon && fd) fclose (fd);
+#endif
+#ifdef SYSLOG
+	}
 	else {
 		syslog(Level, "%s", msg);
 	}
